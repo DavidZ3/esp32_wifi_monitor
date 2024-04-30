@@ -36,7 +36,6 @@ const char *passwordRouter = ROUTER_PASSWORD;
 const char *ntpServer = "pool.ntp.org";
 const long gmtOffsetSec = 36000;  // GMT +10
 const int daylightOffsetSec = 0;
-u16_t tick_count = 0;
 
 // Used for uptime/downtime statistics
 struct tm currentStatusTime;
@@ -78,7 +77,6 @@ void setupRTC() {
     // Init and get the time
     Serial.println("Configuring RTC with timeserver.");
     configTime(gmtOffsetSec, daylightOffsetSec, ntpServer);
-    getLocalTime(&currentStatusTime);
     printLocalTime();
 }
 
@@ -118,6 +116,7 @@ void setup() {
     setupWifiConnection();
     setupRTC();
     setupSdCard();
+    getLocalTime(&currentStatusTime);
 
     String bootTimeStr;
     struct tm timeinfo;
@@ -143,14 +142,15 @@ void setup() {
         UBaseType_t uxPriority, TaskHandle_t *const pvCreatedTask,
         const BaseType_t xCoreID);
     */
-    xTaskCreate(lcdDisplayUpdateTask, "Update LCD Display Task", 5000, NULL, 3,
+    xTaskCreate(lcdDisplayUpdateTask, "Update LCD Display Task", 5000, NULL, 4,
                 NULL);
 
-    xTaskCreate(wifiPingAndLogTask, "Wifi Ping And Log Task", 15000, NULL, 1,
+    xTaskCreate(wifiPingAndLogTask, "Wifi Ping And Log Task", 15000, NULL, 3,
                 NULL);
     xTaskCreate(sdCardRemountTask, "Remount SD card if needed", 5000, NULL, 2,
                 NULL);
-
+    xTaskCreate(updateRTCTask, "Update the RTC", 2000, NULL, 2,
+                NULL);
     // xTaskCreatePinnedToCore(lcdDisplayUpdateTask, "Update LCD Display Task",
     //                         5000, NULL, 1, NULL, 0);
 
@@ -217,6 +217,18 @@ void sdCardRemountTask(void *parameter) {
     }
 }
 
+void updateRTCTask(void *parameter){
+    // Update the RTC every 30min if network avaliable.
+    // Try again once a minute if unavaliable.
+    for(;;){
+        vTaskDelay(30*60*1000);
+        for (boolean success = false; !success; vTaskDelay(60*1000)) {
+            success = Ping.ping(googleDns);
+        }
+        setupRTC();
+    }
+}
+
 void wifiPingAndLogTask(void *parameter) {
     for (;;) {
         String timeStr;
@@ -251,14 +263,6 @@ void wifiPingAndLogTask(void *parameter) {
             while (WiFi.status() != WL_CONNECTED) {
                 Serial.print(".");
             }
-        }
-        if (tick_count >= 360) {
-            if (success) {
-                setupRTC();
-                tick_count = 0;
-            }
-        } else {
-            tick_count++;
         }
         if(!success && !prevPingPassed && netOkay){
             getLocalTime(&currentStatusTime);
