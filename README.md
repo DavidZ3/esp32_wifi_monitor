@@ -14,3 +14,18 @@ The finished (for now) project has the following features:
 
 ## Image of Final Project
 ![Image of Final Project](images/wifi_monitor.jpg)
+
+## Future Works?
+* It may be nice adding to have some way of fetching the data from the ESP32 without removing the SD card. Potentially solutions include:
+  * Uploading data to cloud.
+  * Setting up ESP32 to act as WIFI AP and creating a protocol to fetch data.
+  * Setting up ESP32 to act as a BLE device and fetching data that way.
+* Data visualisation tool.
+  * Currently the data is stored as a text file, it would be nice to have the data analysed and visualised.
+  * Realtime? ✨
+* Form-factor
+  * The current project is just a ESP32-S3, a LCD1602 display (with a PCF8574AT GPIO I2C Expansion Chippie), and 4 wires. I might be nice having a dedicated PCB and housing for it.
+* Net-Statistics
+  * Currently the project just displays uptime/down - it'll be nice to have more stats like packet-loss, packet-jitter, averages, and deviations.
+  * We're only pinging google DNS currently which is unlikely to be down (fine for this purpose) but if we care about the RRT then we should also ping other servers (e.g. cloudflare and ISP DNS).
+
