@@ -17,8 +17,8 @@ const char *ssidRouter = ROUTER_SSID;
 const char *passwordRouter = ROUTER_PASSWORD;
 
 const char *ntpServer = "pool.ntp.org";
-const long gmtOffsetSec = 0;
-const int daylightOffsetSec = 3600;
+const long gmtOffsetSec = 36000; // GMT +10
+const int daylightOffsetSec = 0;
 u16_t tick_count = 0;
 
 void printLocalTime() {
