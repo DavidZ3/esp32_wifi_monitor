@@ -28,4 +28,6 @@ The finished (for now) project has the following features:
 * Net-Statistics
   * Currently the project just displays uptime/down - it'll be nice to have more stats like packet-loss, packet-jitter, averages, and deviations.
   * We're only pinging google DNS currently which is unlikely to be down (fine for this purpose) but if we care about the RRT then we should also ping other servers (e.g. cloudflare and ISP DNS).
+* Code
+  * I hacked together a bunch of code into one file as this is a very small project but may be worth refactoring and properly organising the code-base if I do more work here.
 
