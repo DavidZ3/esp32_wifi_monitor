@@ -3,12 +3,17 @@
 #include <Wire.h>
 #include <led_strip.h>
 #include <time.h>
-
 #include "LiquidCrystal_I2C.h"
 #include "SD_MMC.h"
 #include "esp32_wifi_monitor.h"
 #include "sd_read_write.h"
 #include "wifi_passwords.h"
+
+// #define FAKE_SUPERSPEED_TEST_TIME
+#define SET_LED_RED neopixelWrite(SD_STATUS_LED, 50, 0, 0)
+#define SET_LED_GREEN neopixelWrite(SD_STATUS_LED, 0, 1, 0)
+#define SET_LED_BLUE neopixelWrite(SD_STATUS_LED, 0, 0, 50)
+#define SET_LED_WHITE neopixelWrite(SD_STATUS_LED, 50, 50, 50)
 
 // I2C LCD Display
 #define TOGGLE_DISPLAY_BACKLIGHT_BUTTON_PIN 0
@@ -40,8 +45,8 @@ const int daylightOffsetSec = 0;
 // Used for uptime/downtime statistics
 struct tm currentStatusTime;
 bool netOkay = true;
-
 bool prevPingPassed = true;
+static long totalDrops = 0;
 
 void setupI2cDisplay() {
     Wire.begin(SDA, SCL);
@@ -59,7 +64,7 @@ void setupButtonInterrupt() {
 
 void setupStatusLED() {
     pinMode(SD_STATUS_LED, OUTPUT);
-    neopixelWrite(SD_STATUS_LED, 255, 255, 255);
+    SET_LED_WHITE;
 }
 
 void setupWifiConnection() {
@@ -105,6 +110,7 @@ void setupSdCard() {
     Serial.printf("SD_MMC Card Size: %lluMB\n", cardSize);
 }
 
+static String bootTimeStr;
 void setup() {
     Serial.begin(115200);
     while (!Serial)
@@ -118,19 +124,20 @@ void setup() {
     setupSdCard();
     getLocalTime(&currentStatusTime);
 
-    String bootTimeStr;
     struct tm timeinfo;
     if (!getLocalTime(&timeinfo)) {
-        bootTimeStr = String("Boot-Time: ??:??");
+        bootTimeStr = String("Boot:??:??");
     } else {
         char timeBuffer[64];
-        const char *format = "Boot-Time: %H:%M";
+        const char *format = "Boot:%H:%M";
         strftime(timeBuffer, 64, format, &timeinfo);
         bootTimeStr = String(timeBuffer);
     }
 
+    String firstLineStr = bootTimeStr + String(" ") + String(totalDrops);
     lcd.setCursor(0, 0);
-    lcd.print(bootTimeStr);
+    lcd.clear();
+    lcd.print(firstLineStr);
 
 
     Serial.println("Setup End");
@@ -181,16 +188,31 @@ void printAndLog(String str) {
 void loop() { delay(1000); }
 
 void lcdDisplayUpdateTask(void *parameter) {
+    #ifdef FAKE_SUPERSPEED_TEST_TIME
+    double diffSeconds = 0;
+    #endif
+    long currTotalDrops = totalDrops;
     for (;;) {
         if (doBacklightUpdate) {
             lcd.setBacklight(lcdBacklight);
             doBacklightUpdate = 0;
         }
+        if(currTotalDrops != totalDrops){
+            currTotalDrops = totalDrops;
+            String firstLineStr = bootTimeStr + String(" ") + String(totalDrops);
+            lcd.setCursor(0, 0);
+            lcd.print(firstLineStr);
+        }
+
+        #ifdef FAKE_SUPERSPEED_TEST_TIME
+        diffSeconds += 111;
+        #else
         time_t currTime;
         time(&currTime);
         double diffSeconds = difftime(currTime, mktime(&currentStatusTime));
+        #endif
         int hours = diffSeconds/3600;
-        int minutes = diffSeconds/60;
+        int minutes = (((int) diffSeconds)/60)%60;
         int seconds = ((int) diffSeconds)%60;
 
 
@@ -209,7 +231,7 @@ void lcdDisplayUpdateTask(void *parameter) {
 void sdCardRemountTask(void *parameter) {
     for (;;) {
         if (!canOpen(SD_MMC, "/log.txt")) {
-            neopixelWrite(SD_STATUS_LED, 50, 0, 0);
+            SET_LED_RED;
             SD_MMC.end();
             setupSdCard();
         }
@@ -223,6 +245,7 @@ void updateRTCTask(void *parameter){
     for(;;){
         vTaskDelay(30*60*1000);
         for (boolean success = false; !success; vTaskDelay(60*1000)) {
+            IPAddress googleDns(8, 8, 8, 8);
             success = Ping.ping(googleDns);
         }
         setupRTC();
@@ -249,10 +272,11 @@ void wifiPingAndLogTask(void *parameter) {
             if (success) {
                 printAndLog(timeStr + String(Ping.averageTime()) +
                             String("ms\n"));
-                neopixelWrite(SD_STATUS_LED, 0, 50, 0);
+                SET_LED_GREEN;
             } else {
+                totalDrops++;
                 printAndLog(timeStr + String("FAILED\n"));
-                neopixelWrite(SD_STATUS_LED, 0, 0, 50);
+                SET_LED_BLUE;
             }
         } else {
             // Serial.println("Wifi not connected. Attempting to reconnect!");
