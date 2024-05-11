@@ -43,6 +43,7 @@ const long gmtOffsetSec = 36000;  // GMT +10
 const int daylightOffsetSec = 0;
 
 // Used for uptime/downtime statistics
+struct tm bootTime;
 struct tm currentStatusTime;
 bool netOkay = true;
 bool prevPingPassed = true;
@@ -122,23 +123,25 @@ void setup() {
     setupWifiConnection();
     setupRTC();
     setupSdCard();
+
+    // Setup Current Time as Boot-Time and Current Status Time
+    getLocalTime(&bootTime);
     getLocalTime(&currentStatusTime);
 
-    struct tm timeinfo;
-    if (!getLocalTime(&timeinfo)) {
-        bootTimeStr = String("Boot:??:??");
-    } else {
-        char timeBuffer[64];
-        const char *format = "Boot:%H:%M";
-        strftime(timeBuffer, 64, format, &timeinfo);
-        bootTimeStr = String(timeBuffer);
-    }
+    // struct tm timeinfo;
+    // if (!getLocalTime(&timeinfo)) {
+    //     bootTimeStr = String("Boot:??:??");
+    // } else {
+    //     char timeBuffer[64];
+    //     const char *format = "Boot:%H:%M";
+    //     strftime(timeBuffer, 64, format, &timeinfo);
+    //     bootTimeStr = String(timeBuffer);
+    // }
 
-    String firstLineStr = bootTimeStr + String(" ") + String(totalDrops);
-    lcd.setCursor(0, 0);
-    lcd.clear();
-    lcd.print(firstLineStr);
-
+    // String firstLineStr = bootTimeStr + String(" ") + String(totalDrops);
+    // lcd.setCursor(0, 0);
+    // lcd.clear();
+    // lcd.print(firstLineStr);
 
     Serial.println("Setup End");
 
@@ -188,42 +191,67 @@ void printAndLog(String str) {
 void loop() { delay(1000); }
 
 void lcdDisplayUpdateTask(void *parameter) {
-    #ifdef FAKE_SUPERSPEED_TEST_TIME
-    double diffSeconds = 0;
-    #endif
     long currTotalDrops = totalDrops;
+    static int prevBootTimeStrLen = 0;
+    static int prevStatTimeStrLen = 0;
     for (;;) {
         if (doBacklightUpdate) {
             lcd.setBacklight(lcdBacklight);
             doBacklightUpdate = 0;
         }
-        if(currTotalDrops != totalDrops){
-            currTotalDrops = totalDrops;
-            String firstLineStr = bootTimeStr + String(" ") + String(totalDrops);
-            lcd.setCursor(0, 0);
-            lcd.print(firstLineStr);
-        }
 
-        #ifdef FAKE_SUPERSPEED_TEST_TIME
-        diffSeconds += 111;
-        #else
+        // Update for row 1
+        // if(currTotalDrops != totalDrops){
+        //     currTotalDrops = totalDrops;
+        //     String firstLineStr = bootTimeStr + String(" ") + String(totalDrops);
+        //     lcd.setCursor(0, 0);
+        //     lcd.print(firstLineStr);
+        // }
+
         time_t currTime;
         time(&currTime);
         double diffSeconds = difftime(currTime, mktime(&currentStatusTime));
-        #endif
         int hours = diffSeconds/3600;
         int minutes = (((int) diffSeconds)/60)%60;
         int seconds = ((int) diffSeconds)%60;
+        char bootTimeStr[100];
+        sprintf(bootTimeStr, "%03d:%02d:%02d %d", hours, minutes, seconds, totalDrops);
 
 
-        char timeStatString[100];
+        // Update for row 2
+        #ifdef FAKE_SUPERSPEED_TEST_TIME
+        diffSeconds += 111;
+        #else
+        time(&currTime);
+        diffSeconds = difftime(currTime, mktime(&currentStatusTime));
+        #endif
+        hours = diffSeconds/3600;
+        minutes = (((int) diffSeconds)/60)%60;
+        seconds = ((int) diffSeconds)%60;
+
+
+        char statTimeStr[100];
         if(netOkay){
-            sprintf(timeStatString, "UP: %02d:%02d:%02d", hours, minutes, seconds);
+            sprintf(statTimeStr, "UP: %02d:%02d:%02d", hours, minutes, seconds);
         }else{
-            sprintf(timeStatString, "DOWN: %02d:%02d:%02d", hours, minutes, seconds);
+            sprintf(statTimeStr, "DOWN: %02d:%02d:%02d", hours, minutes, seconds);
         }
+
+        // Clear LCD Only if the Display Length Has Changed
+        if ((strlen(bootTimeStr) != prevBootTimeStrLen) ||
+            (strlen(statTimeStr) != prevStatTimeStrLen)) {
+                prevBootTimeStrLen = strlen(bootTimeStr);
+                prevStatTimeStrLen = strlen(statTimeStr);
+                Serial.println(prevBootTimeStrLen);
+                Serial.println(prevStatTimeStrLen);
+                lcd.clear();
+                lcd.setBacklight(lcdBacklight);
+        }
+
+        lcd.setCursor(0, 0);
+        lcd.print(bootTimeStr);
         lcd.setCursor(0, 1);
-        lcd.print(timeStatString);
+        lcd.print(statTimeStr);
         vTaskDelay(200);
     }
 }
