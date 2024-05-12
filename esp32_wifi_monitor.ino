@@ -3,6 +3,7 @@
 #include <Wire.h>
 #include <led_strip.h>
 #include <time.h>
+
 #include "LiquidCrystal_I2C.h"
 #include "SD_MMC.h"
 #include "esp32_wifi_monitor.h"
@@ -43,6 +44,7 @@ const long gmtOffsetSec = 36000;  // GMT +10
 const int daylightOffsetSec = 0;
 
 // Used for uptime/downtime statistics
+struct tm bootTime;
 struct tm currentStatusTime;
 bool netOkay = true;
 bool prevPingPassed = true;
@@ -113,8 +115,7 @@ void setupSdCard() {
 static String bootTimeStr;
 void setup() {
     Serial.begin(115200);
-    while (!Serial)
-        ;
+    while (!Serial);
     Serial.println("Setup start");
     setupI2cDisplay();
     setupButtonInterrupt();
@@ -122,33 +123,12 @@ void setup() {
     setupWifiConnection();
     setupRTC();
     setupSdCard();
+
+    // Setup Current Time as Boot-Time and Current Status Time
+    getLocalTime(&bootTime);
     getLocalTime(&currentStatusTime);
-
-    struct tm timeinfo;
-    if (!getLocalTime(&timeinfo)) {
-        bootTimeStr = String("Boot:??:??");
-    } else {
-        char timeBuffer[64];
-        const char *format = "Boot:%H:%M";
-        strftime(timeBuffer, 64, format, &timeinfo);
-        bootTimeStr = String(timeBuffer);
-    }
-
-    String firstLineStr = bootTimeStr + String(" ") + String(totalDrops);
-    lcd.setCursor(0, 0);
-    lcd.clear();
-    lcd.print(firstLineStr);
-
-
     Serial.println("Setup End");
 
-    /*
-    BaseType_t xTaskCreatePinnedToCore(
-        TaskFunction_t pvTaskCode, const char *const pcName,
-        const uint32_t usStackDepth, void *const pvParameters,
-        UBaseType_t uxPriority, TaskHandle_t *const pvCreatedTask,
-        const BaseType_t xCoreID);
-    */
     xTaskCreate(lcdDisplayUpdateTask, "Update LCD Display Task", 5000, NULL, 4,
                 NULL);
 
@@ -156,14 +136,7 @@ void setup() {
                 NULL);
     xTaskCreate(sdCardRemountTask, "Remount SD card if needed", 5000, NULL, 2,
                 NULL);
-    xTaskCreate(updateRTCTask, "Update the RTC", 2000, NULL, 2,
-                NULL);
-    // xTaskCreatePinnedToCore(lcdDisplayUpdateTask, "Update LCD Display Task",
-    //                         5000, NULL, 1, NULL, 0);
-
-    // xTaskCreatePinnedToCore(wifiPingAndLogTask, "Wifi Ping And Log Task",
-    // 10000,
-    //                         NULL, 2, NULL, 0);
+    xTaskCreate(updateRTCTask, "Update the RTC", 2000, NULL, 2, NULL);
 }
 
 void lcdBacklightToggle() {
@@ -188,42 +161,56 @@ void printAndLog(String str) {
 void loop() { delay(1000); }
 
 void lcdDisplayUpdateTask(void *parameter) {
-    #ifdef FAKE_SUPERSPEED_TEST_TIME
-    double diffSeconds = 0;
-    #endif
     long currTotalDrops = totalDrops;
+    static int prevBootTimeStrLen = 0;
+    static int prevStatTimeStrLen = 0;
     for (;;) {
         if (doBacklightUpdate) {
             lcd.setBacklight(lcdBacklight);
             doBacklightUpdate = 0;
         }
-        if(currTotalDrops != totalDrops){
-            currTotalDrops = totalDrops;
-            String firstLineStr = bootTimeStr + String(" ") + String(totalDrops);
-            lcd.setCursor(0, 0);
-            lcd.print(firstLineStr);
-        }
 
-        #ifdef FAKE_SUPERSPEED_TEST_TIME
-        diffSeconds += 111;
-        #else
+        // Calculate Update for Row 1
         time_t currTime;
         time(&currTime);
         double diffSeconds = difftime(currTime, mktime(&currentStatusTime));
-        #endif
-        int hours = diffSeconds/3600;
-        int minutes = (((int) diffSeconds)/60)%60;
-        int seconds = ((int) diffSeconds)%60;
+        int hours = diffSeconds / 3600;
+        int minutes = (((int)diffSeconds) / 60) % 60;
+        int seconds = ((int)diffSeconds) % 60;
+        char bootTimeStr[100];
+        sprintf(bootTimeStr, "%03d:%02d:%02d %d", hours, minutes, seconds,
+                totalDrops);
 
+        // Calculate Update for Row 2
+        time(&currTime);
+        diffSeconds = difftime(currTime, mktime(&currentStatusTime));
+        hours = diffSeconds / 3600;
+        minutes = (((int)diffSeconds) / 60) % 60;
+        seconds = ((int)diffSeconds) % 60;
 
-        char timeStatString[100];
-        if(netOkay){
-            sprintf(timeStatString, "UP: %02d:%02d:%02d", hours, minutes, seconds);
-        }else{
-            sprintf(timeStatString, "DOWN: %02d:%02d:%02d", hours, minutes, seconds);
+        char statTimeStr[100];
+        if (netOkay) {
+            sprintf(statTimeStr, "UP: %02d:%02d:%02d", hours, minutes, seconds);
+        } else {
+            sprintf(statTimeStr, "DOWN: %02d:%02d:%02d", hours, minutes,
+                    seconds);
         }
+
+        // Clear LCD Only if the Display Length Has Changed
+        if ((strlen(bootTimeStr) != prevBootTimeStrLen) ||
+            (strlen(statTimeStr) != prevStatTimeStrLen)) {
+            prevBootTimeStrLen = strlen(bootTimeStr);
+            prevStatTimeStrLen = strlen(statTimeStr);
+            Serial.println(prevBootTimeStrLen);
+            Serial.println(prevStatTimeStrLen);
+            lcd.clear();
+            lcd.setBacklight(lcdBacklight);
+        }
+
+        lcd.setCursor(0, 0);
+        lcd.print(bootTimeStr);
         lcd.setCursor(0, 1);
-        lcd.print(timeStatString);
+        lcd.print(statTimeStr);
         vTaskDelay(200);
     }
 }
@@ -239,12 +226,12 @@ void sdCardRemountTask(void *parameter) {
     }
 }
 
-void updateRTCTask(void *parameter){
+void updateRTCTask(void *parameter) {
     // Update the RTC every 30min if network avaliable.
     // Try again once a minute if unavaliable.
-    for(;;){
-        vTaskDelay(30*60*1000);
-        for (boolean success = false; !success; vTaskDelay(60*1000)) {
+    for (;;) {
+        vTaskDelay(30 * 60 * 1000);
+        for (boolean success = false; !success; vTaskDelay(60 * 1000)) {
             IPAddress googleDns(8, 8, 8, 8);
             success = Ping.ping(googleDns);
         }
@@ -268,13 +255,13 @@ void wifiPingAndLogTask(void *parameter) {
         boolean success = false;
         if (WiFi.status()) {
             IPAddress googleDns(8, 8, 8, 8);
+            // Default is 5 attempts
             success = Ping.ping(googleDns);
             if (success) {
                 printAndLog(timeStr + String(Ping.averageTime()) +
                             String("ms\n"));
                 SET_LED_GREEN;
             } else {
-                totalDrops++;
                 printAndLog(timeStr + String("FAILED\n"));
                 SET_LED_BLUE;
             }
@@ -288,10 +275,11 @@ void wifiPingAndLogTask(void *parameter) {
                 Serial.print(".");
             }
         }
-        if(!success && !prevPingPassed && netOkay){
+        if (!success && !prevPingPassed && netOkay) {
+            totalDrops++;
             getLocalTime(&currentStatusTime);
             netOkay = false;
-        }else if(success && !netOkay){
+        } else if (success && !netOkay) {
             getLocalTime(&currentStatusTime);
             netOkay = true;
         }
