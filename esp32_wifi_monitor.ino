@@ -200,14 +200,6 @@ void lcdDisplayUpdateTask(void *parameter) {
             doBacklightUpdate = 0;
         }
 
-        // Update for row 1
-        // if(currTotalDrops != totalDrops){
-        //     currTotalDrops = totalDrops;
-        //     String firstLineStr = bootTimeStr + String(" ") + String(totalDrops);
-        //     lcd.setCursor(0, 0);
-        //     lcd.print(firstLineStr);
-        // }
-
         time_t currTime;
         time(&currTime);
         double diffSeconds = difftime(currTime, mktime(&currentStatusTime));
@@ -296,13 +288,13 @@ void wifiPingAndLogTask(void *parameter) {
         boolean success = false;
         if (WiFi.status()) {
             IPAddress googleDns(8, 8, 8, 8);
+            // Default is 5 attempts
             success = Ping.ping(googleDns);
             if (success) {
                 printAndLog(timeStr + String(Ping.averageTime()) +
                             String("ms\n"));
                 SET_LED_GREEN;
             } else {
-                totalDrops++;
                 printAndLog(timeStr + String("FAILED\n"));
                 SET_LED_BLUE;
             }
@@ -317,6 +309,7 @@ void wifiPingAndLogTask(void *parameter) {
             }
         }
         if(!success && !prevPingPassed && netOkay){
+            totalDrops++;
             getLocalTime(&currentStatusTime);
             netOkay = false;
         }else if(success && !netOkay){
